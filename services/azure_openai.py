@@ -1,88 +1,73 @@
 """
-AI client backed by Azure AI Foundry via the azure-ai-inference SDK.
+AI client for Azure AI Foundry OpenAI-compatible endpoints.
 
-The public interface (embed / embed_batch / chat / chat_with_system) is
-identical to the previous implementation so no other module needs changes.
+Azure AI Foundry project endpoints expose an OpenAI v1-compatible API at:
+  https://<hub>.services.ai.azure.com/api/projects/<project>/openai/v1
+
+The plain `openai.OpenAI` client with a custom `base_url` is the correct
+SDK for this path — the `azure-ai-inference` SDK appends `?api-version=`
+which the /v1 path rejects.
 """
 from __future__ import annotations
 
 import logging
+import re
 from typing import Iterator
 
-from azure.ai.inference import ChatCompletionsClient, EmbeddingsClient
-from azure.ai.inference.models import (
-    AssistantMessage,
-    ChatRequestMessage,
-    SystemMessage,
-    UserMessage,
-)
-from azure.core.credentials import AzureKeyCredential
+from openai import OpenAI
 
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
 
-def _build_messages(raw: list[dict]) -> list[ChatRequestMessage]:
-    """Convert plain dicts to azure-ai-inference message objects."""
-    result = []
-    for m in raw:
-        role = m.get("role", "user")
-        content = m.get("content", "")
-        if role == "system":
-            result.append(SystemMessage(content=content))
-        elif role == "assistant":
-            result.append(AssistantMessage(content=content))
-        else:
-            result.append(UserMessage(content=content))
-    return result
+def _normalize_endpoint(endpoint: str) -> str:
+    """
+    Return the base URL expected by the OpenAI client:
+      https://<hub>.services.ai.azure.com/api/projects/<proj>/openai/v1
+
+    Strips any trailing operation path (/responses, /chat/completions, etc.)
+    and ensures there is no trailing slash.
+    """
+    # Remove everything after /v1 (e.g. /responses, /chat/completions)
+    endpoint = re.sub(r"(/v1)/.*$", r"\1", endpoint.rstrip("/"))
+    return endpoint
 
 
 class AzureOpenAIService:
     """
-    Thin wrapper around Azure AI Foundry inference endpoints.
-    Uses ChatCompletionsClient for generation and EmbeddingsClient for vectors.
+    Thin wrapper around an Azure AI Foundry OpenAI-compatible endpoint.
+    Uses the `openai` SDK with a custom base_url — no api-version needed.
     """
 
     def __init__(self) -> None:
-        self._credential = AzureKeyCredential(settings.AZURE_AI_FOUNDRY_API_KEY)
-        self._chat_client: ChatCompletionsClient | None = None
-        self._embed_client: EmbeddingsClient | None = None
+        self._client: OpenAI | None = None
 
     @property
-    def chat_client(self) -> ChatCompletionsClient:
-        if self._chat_client is None:
-            self._chat_client = ChatCompletionsClient(
-                endpoint=settings.AZURE_AI_FOUNDRY_ENDPOINT,
-                credential=self._credential,
+    def client(self) -> OpenAI:
+        if self._client is None:
+            base_url = _normalize_endpoint(settings.AZURE_AI_FOUNDRY_ENDPOINT)
+            logger.info("Connecting to AI Foundry endpoint: %s", base_url)
+            self._client = OpenAI(
+                base_url=base_url,
+                api_key=settings.AZURE_AI_FOUNDRY_API_KEY,
             )
-        return self._chat_client
-
-    @property
-    def embed_client(self) -> EmbeddingsClient:
-        if self._embed_client is None:
-            self._embed_client = EmbeddingsClient(
-                endpoint=settings.AZURE_AI_FOUNDRY_ENDPOINT,
-                credential=self._credential,
-            )
-        return self._embed_client
+        return self._client
 
     # ------------------------------------------------------------------
     # Embeddings
     # ------------------------------------------------------------------
 
     def embed(self, text: str) -> list[float]:
-        """Generate an embedding vector for a single text."""
-        response = self.embed_client.embed(
+        response = self.client.embeddings.create(
             model=settings.AZURE_AI_FOUNDRY_EMBEDDING_DEPLOYMENT,
-            input=[text],
+            input=text,
             dimensions=settings.EMBEDDING_DIMENSIONS,
         )
         return response.data[0].embedding
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """Generate embeddings for a batch of texts."""
-        response = self.embed_client.embed(
+        response = self.client.embeddings.create(
             model=settings.AZURE_AI_FOUNDRY_EMBEDDING_DEPLOYMENT,
             input=texts,
             dimensions=settings.EMBEDDING_DIMENSIONS,
@@ -100,15 +85,9 @@ class AzureOpenAIService:
         max_tokens: int = 2048,
         stream: bool = False,
     ) -> str | Iterator[str]:
-        """
-        Send a chat completion request via Azure AI Foundry.
-        If stream=True, yields text chunks; otherwise returns the full string.
-        """
-        ai_messages = _build_messages(messages)
-
-        response = self.chat_client.complete(
+        response = self.client.chat.completions.create(
             model=settings.AZURE_AI_FOUNDRY_CHAT_DEPLOYMENT,
-            messages=ai_messages,
+            messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
             stream=stream,
@@ -120,9 +99,9 @@ class AzureOpenAIService:
         return response.choices[0].message.content or ""
 
     def _stream_response(self, response) -> Iterator[str]:
-        for update in response:
-            if update.choices and update.choices[0].delta.content:
-                yield update.choices[0].delta.content
+        for chunk in response:
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
 
     def chat_with_system(
         self,

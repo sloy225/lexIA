@@ -41,9 +41,8 @@ class DocumentIntelligenceService:
 
         poller = self.client.begin_analyze_document(
             "prebuilt-layout",
-            analyze_request=AnalyzeDocumentRequest(bytes_source=file_bytes),
+            AnalyzeDocumentRequest(bytes_source=file_bytes),
             features=[DocumentAnalysisFeature.KEY_VALUE_PAIRS],
-            output_content_format="markdown",
         )
         result = poller.result()
 
@@ -101,9 +100,8 @@ class DocumentIntelligenceService:
 
         poller = self.client.begin_analyze_document(
             "prebuilt-layout",
-            analyze_request=AnalyzeDocumentRequest(url_source=blob_url),
+            AnalyzeDocumentRequest(url_source=blob_url),
             features=[DocumentAnalysisFeature.KEY_VALUE_PAIRS],
-            output_content_format="markdown",
         )
         result = poller.result()
 

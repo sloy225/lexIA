@@ -1,5 +1,5 @@
 streamlit>=1.32.0
-azure-ai-inference>=1.0.0b9
+openai>=1.14.0
 azure-ai-documentintelligence>=1.0.0
 azure-search-documents>=11.6.0
 azure-storage-blob>=12.19.0

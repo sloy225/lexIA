@@ -15,10 +15,6 @@ from azure.search.documents.indexes.models import (
     SearchField,
     SearchFieldDataType,
     SearchIndex,
-    SemanticConfiguration,
-    SemanticField,
-    SemanticPrioritizedFields,
-    SemanticSearch,
     SimpleField,
     SearchableField,
     VectorSearch,
@@ -122,23 +118,10 @@ class RAGService:
             profiles=[VectorSearchProfile(name="hnsw-profile", algorithm_configuration_name="hnsw-algo")],
         )
 
-        semantic_search = SemanticSearch(
-            configurations=[
-                SemanticConfiguration(
-                    name="semantic-config",
-                    prioritized_fields=SemanticPrioritizedFields(
-                        content_fields=[SemanticField(field_name="content")],
-                        keywords_fields=[SemanticField(field_name="section_title")],
-                    ),
-                )
-            ]
-        )
-
         index = SearchIndex(
             name=settings.AZURE_SEARCH_INDEX_NAME,
             fields=fields,
             vector_search=vector_search,
-            semantic_search=semantic_search,
         )
         self._index_client.create_index(index)
 
@@ -232,14 +215,13 @@ class RAGService:
 
         filter_expr = f"document_id eq '{document_id}'" if document_id else None
 
+        # Hybrid search: vector + BM25 keyword (no semantic ranker required)
         raw_results = self._search_client.search(
             search_text=query,
             vector_queries=[vector_query],
             filter=filter_expr,
             select=["id", "document_id", "filename", "content", "section_title", "chunk_index", "page_number"],
             top=top_k,
-            query_type="semantic",
-            semantic_configuration_name="semantic-config",
         )
 
         results = []

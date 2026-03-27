@@ -93,12 +93,13 @@ def render() -> None:
 
         st.markdown("---")
         st.markdown("### Questions suggérées")
-        for q in _SUGGESTED_QUESTIONS:
-            if st.button(q, key=f"suggest_{q[:20]}", use_container_width=True):
+        short_id = selected_id[:8]
+        for i, q in enumerate(_SUGGESTED_QUESTIONS):
+            if st.button(q, key=f"sq_{short_id}_{i}", use_container_width=True):
                 st.session_state["pending_question"] = q
                 st.rerun()
 
-        if st.button("Effacer l'historique", use_container_width=True):
+        if st.button("Effacer l'historique", key=f"clear_{short_id}", use_container_width=True):
             chat_key = f"chat_history_{selected_id}"
             st.session_state[chat_key] = []
             st.rerun()

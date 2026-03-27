@@ -3,33 +3,11 @@ from __future__ import annotations
 
 import uuid
 import streamlit as st
-from azure.storage.blob import BlobServiceClient
 
 from config.settings import settings
 from services.document_intelligence import document_intelligence_service
 from services.rag import rag_service
-from utils.file_utils import (
-    compute_file_hash,
-    get_blob_name,
-    human_readable_size,
-    validate_file,
-)
-
-
-def _upload_to_storage(file_bytes: bytes, blob_name: str) -> str:
-    """Upload file to Azure Blob Storage and return the blob URL."""
-    blob_service = BlobServiceClient.from_connection_string(
-        settings.AZURE_STORAGE_CONNECTION_STRING
-    )
-    container = blob_service.get_container_client(settings.AZURE_STORAGE_CONTAINER_NAME)
-    try:
-        container.create_container()
-    except Exception:
-        pass  # already exists
-
-    blob_client = container.get_blob_client(blob_name)
-    blob_client.upload_blob(file_bytes, overwrite=True)
-    return blob_client.url
+from utils.file_utils import compute_file_hash, human_readable_size, validate_file
 
 
 def render() -> None:
@@ -75,17 +53,7 @@ def render() -> None:
 
     with st.status("Traitement en cours…", expanded=True) as status:
 
-        # 1. Azure Blob Storage
-        st.write("Téléversement vers Azure Storage…")
-        try:
-            blob_name = get_blob_name(document_id, uploaded.name)
-            blob_url = _upload_to_storage(file_bytes, blob_name)
-            st.write(f"Stockage : ✅")
-        except Exception as exc:
-            st.warning(f"Stockage ignoré (non critique) : {exc}")
-            blob_url = None
-
-        # 2. Document Intelligence
+        # 1. Document Intelligence — extract text
         st.write("Extraction du texte avec Azure Document Intelligence…")
         try:
             extracted = document_intelligence_service.extract_from_bytes(
@@ -97,8 +65,8 @@ def render() -> None:
             st.error(f"Erreur Document Intelligence : {exc}")
             return
 
-        # 3. RAG indexing
-        st.write("Indexation dans Azure AI Search…")
+        # 2. RAG indexing — chunk + embed + store in memory
+        st.write("Indexation en mémoire (embeddings)…")
         try:
             stats = rag_service.index_document(
                 document_id=document_id,
@@ -109,7 +77,7 @@ def render() -> None:
             st.write(f"Indexation : ✅ ({stats.chunks_indexed} segments)")
         except Exception as exc:
             status.update(label="Échec de l'indexation", state="error")
-            st.error(f"Erreur Azure AI Search : {exc}")
+            st.error(f"Erreur lors de l'indexation : {exc}")
             return
 
         status.update(label="Traitement terminé !", state="complete")
@@ -123,7 +91,6 @@ def render() -> None:
         "page_count": extracted.page_count,
         "chunks_indexed": stats.chunks_indexed,
         "file_hash": file_hash,
-        "blob_url": blob_url,
     }
 
     if "documents" not in st.session_state:

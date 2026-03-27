@@ -104,6 +104,14 @@ def render() -> None:
             st.session_state[chat_key] = []
             st.rerun()
 
+    # ------------------------------------------------------------------ Check index is in memory
+    if not rag_service.is_indexed(selected_id):
+        st.warning(
+            "Ce contrat n'est plus en mémoire (le serveur a redémarré). "
+            "Veuillez le **réimporter** depuis la page Import."
+        )
+        return
+
     # ------------------------------------------------------------------ Chat history
     chat_key = f"chat_history_{selected_id}"
     if chat_key not in st.session_state:
